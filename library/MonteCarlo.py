@@ -22,9 +22,6 @@ class ModifiedMonteCarlo():
             self.tables[key] = self.make_tables(len(keys_data.keys() ) )
             self.s_of_t[key] = {}
 
-            self.fill_tables(key, len(keys_data.keys()) )
-
-
     def delete_training(self, training_keys = None):
         if training_keys:
             for key in training_keys:
@@ -51,9 +48,8 @@ class ModifiedMonteCarlo():
     #created_at, end_status: ,checkin, checkout:,
     #tables: date_start: "r_of_i_t":numpy array
 
-    def __init__(self, full_training_dict = None, k_iterations = 1):
+    def __init__(self, full_training_dict = None):
         #big class variables
-        self.k_iterations = k_iterations
         self.training_data_set = {}
         self.tables = {}
         self.s_of_t = {}
@@ -61,6 +57,9 @@ class ModifiedMonteCarlo():
         self.r_of_i_t = np.zeros( (365, 365) ) #for all year
         if full_training_dict:
             self.add_training(full_training_dict)
+
+        #fill tables
+        self.fill_tables()
 
         #make the trend estimator for every table
         self.this_trend = trend_estimator.TrendEstimator(self.s_of_t)
@@ -78,7 +77,7 @@ class ModifiedMonteCarlo():
         #one for each season
         dictionary = {}
         dictionary['r_of_i_t'] = np.zeros( (365, duration_int))
-        dictionary['c_of_t'] = np.zeros( (365, duration_int)) #just keeps track of % of
+        dictionary['c_of_t'] = np.zeros( (1, duration_int)) #just keeps track of % of cancellations that occur for reservations made at t in season
         dictionary['b_hat_i'] = np.zeros( (1, 365) )
         dictionary['r_of_j_t'] = np.zeros( (1, 365) )
         #length_of_stay: {season: duration_length: probability}
@@ -93,15 +92,18 @@ class ModifiedMonteCarlo():
     IF this is the table used, it's important that when in prediction, you calculate the day_int of the day in the cluster's individual calendar, or make a calendar dict to keep track.
     '''
 
-    def fill_tables(self, key, duration):
+    def fill_tables(self):
         #full reservation counts for t
         #week_number: i:count
         #duration_length: count
 
         #this_cluster of consecutive days: day: reservation_id: reservation_data
         all_checkins = self.tables.keys()
+
+        #fill in tables in order of dates
         sorted_checkins = sorted(all_checkins)
         t_int = 0
+
         for k_cluster in sorted_checkins:
         #k_cluster_data in self.training_data_set.iteritems():
             all_lengths_of_stays = {}
@@ -110,21 +112,18 @@ class ModifiedMonteCarlo():
             if isinstance(k_cluster_data.keys()[0], str):
                 sorted_days = sorted([datetime.datetime.strptime(entry, "%Y-%m-%d").date() for entry in k_cluster_data.keys()])
             else:
-                sorted_days = sorted(k_cluster_data.keys())
+                sorted_days = sorted([entry for entry in k_cluster_data.keys()]) #preserve date object
 
 
             for t, day in enumerate(sorted_days):
                 #self.s_of_t[key][day] = 0
                 #
-                #Life Hack: center s_of_t where 0 = 1
-                self.s_of_t[key][day] = 1
+                #Life Hack: center s_of_t where 0 = 1 to make time_series prediction happy
+                self.s_of_t[k_cluster][day] = 1
 
                 if k_cluster_data[day]:
                     cancellation_count = 0
                     for reservation_id, reservation_data in k_cluster_data[day].iteritems():
-                        #in the case that there are no reservations this day
-                        if not reservation_data:
-                            break
 
                         #get general variables
                         if not isinstance(reservation_data['checkin'], str):
@@ -147,7 +146,7 @@ class ModifiedMonteCarlo():
 
                         if i < 0:
                             print "input wrong for enquiry day in fill_tables_by_cluster"
-                            return
+                            sys.exit()
 
                         #do duration
                         duration = (datetime.datetime.strptime(reservation_data['checkout'], "%Y-%m-%d").date() - checkin ).days
@@ -164,7 +163,7 @@ class ModifiedMonteCarlo():
                             cancellation_count += 1
                         elif reservation_data['status'] == 'CONFIRMED': #constrained demand
                             #fill number of reservations that come on day i for day t.
-                            self.s_of_t[key][day] += 1
+                            self.s_of_t[k_cluster][day] += 1
                             self.tables[k_cluster]['r_of_i_t'][i, t] += 1
                             self.r_of_i_t[i, (t + t_int)] += 1
                         elif reservation_data['status'] == 'ENQUIRY':
@@ -173,7 +172,7 @@ class ModifiedMonteCarlo():
 
                     #do cancellation, which can only be the generalised cancellation rate, not by i
                     try:
-                        self.tables[k_cluster]["c_of_t"][0, t] = float(cancellation_count) / self.tables[k_cluster]['r_of_j_t'][0, t]
+                        self.tables[k_cluster]['c_of_t'][0, t] = float(cancellation_count) / self.tables[k_cluster]['r_of_j_t'][0, t]
                     except ZeroDivisionError:
                         #there was no reservation data for this day
                         #we will keep the cancellation rate of 0
@@ -224,16 +223,18 @@ class ModifiedMonteCarlo():
                 self.tables[key]['season_t_to_year_t_conversion'][0, t] = (t_int + t)
 
                 for i in range(0, 365):
-                    #PROBLEM HERE!  the predicting s_t not good
                     b_hat_i_t = self.tables[key]['b_hat_i'][0, i] * self.this_trend.predict_forecasted_s_t(t_int, 0)
 
                     #TEST
                     if not math.isnan(b_hat_i_t):
                         #print "b_hat_i is nan for t ", t, " i ", i
                         print "WHOOPEE WE GOT SOMETHING" #never get anything
+                    else:
+                        print "we have nan again"
+                        sys.exit()
 
-                    #self.b_hat_i_t[i, t_int] = self.tables[key]['b_hat_i'][0, i] * self.this_trend.predict_forecasted_s_t(t_int, 1)
-                    #for the situation where s_of_t has been normalised around 1
+                    #self.b_hat_i_t[i, t_int] = self.tables[key]['b_hat_i'][0, i] * HACK: self.this_trend.predict_forecasted_s_t(t_int, 1)
+                    #for the situation where s_of_t has been normalised around 1, thus the minus 1 later
                     proposed_trend = self.this_trend.predict_forecasted_s_t(t_int, 1) - 1
                     if proposed_trend < 0:
                         proposed_trend = 0
@@ -272,11 +273,10 @@ class ModifiedMonteCarlo():
 
     '''
     i is the day ahead that we are looking at, to predict for day t
-    t is the day after the last day of training, the intended checkin
     returns an int number of predicted reservations, minus cancellations
     day can be a datetime object
     '''
-    def predict_reservations(self, i, day):
+    def _predict_reservations(self, day, i):
         season = self.discover_season(day)
         predicted_reservations = 0
 
@@ -290,58 +290,50 @@ class ModifiedMonteCarlo():
         #figure out year_t
         year_t = self.tables[season]['season_t_to_year_t_conversion'][0, season_t]
 
+        #randomly gives a n and p from this day's n,p table
         n_p_dict = self.binomial_distribution.get_n_p(i, year_t)
 
-
-        #probability is the probabiliyt that the reservation will materialise
-        threshold = n_p_dict['p'] * 100
-
-        #in case when there was no reservation data
-        if n_p_dict['n'] == 0:
+        #in case when there was no reservation data or no chance of the reservation materialising
+        if n_p_dict['n'] == 0 or n_p_dict['p'] == 0:
             return 0
 
+        #probability is the probabiliyt that the reservation will materialise for day t, i days in advance
+        threshold = int(n_p_dict['p'] * 100)
+
         for x in range(0, n_p_dict['n']):
-            random_pick = randint(0, threshold)
+            random_pick = randint(1, 100) #includes the ends
             if random_pick < threshold:
                 predicted_reservations += 1
 
-        #make cancelations
-        predicted_reservations =+ self.predicted_cancellations(season, season_t, predict_reservations)
-
-        if predicted_reservations <= 0:
-            return 0
-
-
-        if predicted_reservations <= 0:
-            return None
-
-        #make durations
-        reservation_dict = {}
-        for x in range(0, predicted_reservations):
-            reservation_dict[x] = self.predict_duration(season)
-
-        return reservation_dict
+        return predicted_reservations
 
     '''
+    **predicted cancellations based on average chance of cancellation for the season**
+
     returns an int number of predicted cancellations
+    predicted_reservations_dict: i : [durations, None]
     '''
-    def predict_cancellations(self, season, t, predicted_reservations):
-        cancellation_threshold = self.tables['c_of_t'][0, t] * 100
+    def _predict_cancellations(self, season, t, predicted_reservations_dict):
+        cancellation_threshold = int(self.tables['c_of_t'][0, t] * 100)
         predicted_cancellations = 0
 
-        if predicted_reservations == 0:
-            return 0
+        final = {}
+        for i, duration_list in enumerate(reservations_i_list):
+            for x, duration in enumerate(duration_list):
+                cancellation_choice = randint(0, 100)
 
-        for n in (0, predicted_reservations):
-            cancellation_choice = randint(0, cancellation_threshold)
+                #if the chance of being cancelled is 20%, then we say we randomly pick an int from 100 and the int is < than the threshod (20 in this case), then it's a cancellation, and if it's greater the reservation survives
+                if cancellation_choice > cancellation_threshold:
+                    if i not in final.keys():
+                        final[i] = []
 
-            if cancellation_choice < cancellation_threshold:
-                predicted_cancellations += 1
+                    final[i].append(duration)
 
-        return predicted_cancellations
+        #return dict: {i: [durations]}
+        return final
 
     #t is the day array int in the season
-    def predict_duration(self, season):
+    def _predict_duration(self, season):
         probability_dict = self.tables[season]['length_of_stay'][0, t] #check to make sure there is no off by one error
         probability_thresholds = {} #probability threshold: duration value
         last_threshold = 0
@@ -358,18 +350,51 @@ class ModifiedMonteCarlo():
 
 
     '''
+    This is the main prediction function
     day can be a datetime object
-    '''
-    def predict(self, day, point_of_view = None):
-        #must be datetime object
-        if not point_of_view:
-            #i is the
-            #i = self.discover_season(day)
-            i = 0
-        else:
-            i = (point_of_view - datetime.date(2014, 1, 1)).days
+    original_reservations_dict: day: [i: duration]
 
-        return self.predict_reservations(i, day)
+    default to predicting at least up to the day before prediction
+
+    '''
+    def predict(self, day, day_known_reservations_dict, point_of_view = 0):
+        #must be datetime object
+
+        #the key is i before checkin day
+        if day_known_reservations_dict:
+            tot_reservations_predicted = day_known_reservations_dict
+        else:
+            tot_reservations_predicted = {}
+
+        for i in range(0, point_of_view):
+            proposed_reservations = self.predict_reservations(i, day)
+            if proposed_reservations < 0:
+                print "we have a negative number of reservations proposed."
+                sys.exit()
+            elif proposed_reservations > 0:
+                for x in range(0, proposed_reservations):
+                    if i not in tot_reservations_predicted.keys():
+                        tot_reservations_predicted[i] = []
+
+                    tot_reservations_predicted[i].append(None)
+
+        if not tot_reservations_predicted:
+            return 0
+
+        #make cancelations
+        season = self.discover_season(day)
+        season_t = (day - season).days
+        final_reservations_dict = self._predict_cancellations(season, season_t, tot_reservations_predicted)
+
+        #make durations
+        reservation_dict = {}
+        for i, durations_list in final_reservations_dict.iteritems():
+            for x, duration in enumerate(durations_list):
+                if duration is None:
+                    duration = self._predict_duration(season)
+
+        #returns r
+        return reservation_dict
 
 
     #begin the unit testing portion of this class
@@ -396,11 +421,36 @@ def test_r_ofj_t(monte_carlo_object, season, expected_coordinates_of_entry):
 
 def test():
     #make sample
-    reservation_dict = {datetime.date(2014, 1, 1): {datetime.date(2014, 1, 1): {'1': {'checkin': "2014-01-01", 'checkout': '2014-01-03', 'created_at': '2013-12-31', 'status': 'CONFIRMED'}, '2': {'checkin': "2014-01-01", 'checkout': '2014-01-03', 'created_at': '2013-12-31', 'status': 'CONFIRMED'}, '3': {'checkin': "2014-01-01", 'checkout': '2014-01-03', 'created_at': '2013-12-30', 'status': 'CANCELLED'}, '4': {'checkin': "2014-01-01", 'checkout': '2014-01-03', 'created_at': '2013-12-30', 'status': 'CANCELLED'}}, datetime.date(2014, 1, 2): None, datetime.date(2014, 1, 3): {'1': {'checkin': '2014-01-03', 'checkout': '2014-01-20', 'created_at': '2014-01-01', 'status': 'CONFIRMED'}, '2': {'checkin': '2014-01-03', 'checkout': '2014-01-15', 'created_at': '2014-01-02', 'status': 'CONFIRMED'}, '3': {'checkin': '2014-01-03', 'checkout': '2014-01-10', 'created_at': '2014-01-01', 'status': 'CANCELLED'}}} }
+    with open('../data/sample.json') as jsonFile:
+        reservation_dict = json.load(jsonFile)
 
-    my_monte = ModifiedMonteCarlo(reservation_dict)
+    for location_id in reservation_dict.keys():
+        print "On location ", location_dict[location_id]
+        #results: listing_id: results
+        results = {}
+        for listing_id in training_dict_all[location_id].keys():
+            occupancy_predictions = {} #will be filled with arbitrary occupancy dicts where the k iteration is the key
 
-    my_monte.predict(datetime.date(2014, 1, 5))
+            #(self, full_training_dict = None, k_iterations = 1)
+            listing_Monte = MonteCarlo.ModifiedMonteCarlo(training_dict_all[location_id][listing_id])
+
+            for k in range(0, k_iterations):
+
+                #reservations come as dict with int: duration_int
+                #this_occupancy_dict: day: i: [duration]
+                this_occupancy_dict = get_first_reservations_predictions(start_date, end_date)
+
+                for day in my_time._daterange(start_date, end_date):
+                    fill_predictions_occupancy_on_day(myMonte, this_occupancy_dict, day, end_date, k_iterations)
+
+                #this occupancy dict should be like day: binary 0/1
+                occupancy_predictions[k] = this_occupancy_dict
+
+            #average the results
+            prediction_dict = average_predictions(occupancy_predictions)
+            #now do analysis of results for
+            listing_results = compare_results(listing_id, prediction_dict)
+            results[listing_id] = listing_results
 
     print "hello"
 
