@@ -1,4 +1,4 @@
-from monte_carlo import MonteCarlo
+from library import MonteCarlo
 from library import common_database_functions, my_time, classification
 import datetime
 import json
