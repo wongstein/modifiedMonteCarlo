@@ -40,7 +40,7 @@ def get_id_location_pairs():
 '''
 types wanted is a list
 '''
-def get_reservations(types_wanted):
+def get_reservations():
     worldhomes_data = database.database("worldhomes")
 
     query = "SELECT `listing_id`,`checkin`, `checkout`, `status`, CASE status WHEN 'CONFIRMED' OR 'BLOCKEDBYCONFIRMED' OR 'CANCELLATIONREQUESTED' OR 'UNAVAILABLE' OR 'DOUBLEBOOKING' THEN 'CONFIRMED' END AS status FROM `reservations` WHERE `additional_description` NOT LIKE 'test ' AND `checkin` >= '2014-01-01' AND `checkout` < '2016-01-30' AND `listing_id` IS NOT NULL AND DATEDIFF(`checkin`, `created_at`) <= 365 AND DATEDIFF(`checkout`, `checkin`) >= 0 ORDER BY `status`;"

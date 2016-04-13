@@ -11,6 +11,8 @@ with open("data/occupancy_dict.json") as jsonFile:
     occupancy_dict = json.load(jsonFile)
 
 #BASED ON PER LISTING TRAINING
+#ALso, delete listings whos created dates are not before 2014- 01- 01
+
 def make_training_dict_structure():
     #location_id: listing_id: k_cluster_checkin: day: reservation data
     global training_dict_all
@@ -20,18 +22,27 @@ def make_training_dict_structure():
         all_k_means_data = json.load(jsonFile)
 
     #goal: to group the trianin data so that each cluster is a consecutive span of days
-    for year in ['2014', '2015']:
-        for location in [0, 1, 19]:
-            training_dict_all[location] = {}
-            valid_ids = common_database_functions.get_listings_for_single_location(location)
-            for listing_id in valid_ids:
-                training_dict_all[location][listing_id] = {}
-                this_dict = training_dict_all[location][listing_id]
 
-                #should be a year, convert to datetime objects, then sort
-                original_days = [datetime.datetime.strptime(entry, "%Y-%m-%d").date() for entry in all_k_means_data[year][str(location)]['3'].keys()]
-                sorted_days = sorted(original_days)
+    for location in [0, 1, 19]:
+        training_dict_all[location] = {}
+        valid_ids = common_database_functions.get_listings_for_single_location(location)
 
+        for listing_id in valid_ids:
+            training_dict_all[location][listing_id] = {}
+
+            #should be a year, convert to datetime objects, then sort
+            for year in ['2014', '2015']:
+
+                #changed dictionary logic
+                #group k-clusters together :/
+                for day in my_time._daterange(datetime.date(int(year), 1, 1), datetime.date(int(year) + 1, 1, 1)):
+                    day_season = all_k_means_data[year][str(location)]['3'][str(day)]
+                    if day_season not in training_dict_all[location][listing_id].keys():
+                        training_dict_all[location][listing_id][day_season] = {}
+
+                    training_dict_all[location][listing_id][day_season][str(day)] = {}
+
+                '''
                 #setup loop
                 last_key = sorted_days[0]
                 training_dict_all[location][listing_id][str(last_key)] = {}
@@ -43,6 +54,7 @@ def make_training_dict_structure():
                     else:
                         last_key = day #update
                         training_dict_all[location][listing_id][last_key.strftime("%Y-%m-%d")] = {day.strftime("%Y-%m-%d"):None}
+                '''
 
 def fill_training_dict_with_reservations():
     global training_dict_all, all_reservations
@@ -65,13 +77,12 @@ def fill_training_dict_with_reservations():
             if not str(listing_id) in all_reservations.keys():
                 continue
 
-            for checkin, k_data in training_dict_all[location_id].iteritems():
-                for day, dictionary in k_data.iteritems():
+            for k_cluster, day_data in k_seasons_data.iteritems():
+                for day, dictionary in day_data.iteritems():
                     this_day = datetime.datetime.strptime(day, "%Y-%m-%d").date()
                     if all_reservations[str(listing_id)][str(this_day.year)][str(this_day)]:
 
-                        for reservation, reservation_data in all_reservations[str(listing_id)][str(this_day.year)][str(this_day)].iteritems():
-                            dictionary[str(this_day)] = reservation_data
+                        dictionary = all_reservations[str(listing_id)][str(this_day.year)][str(this_day)]
 
 def main():
     global training_dict_all

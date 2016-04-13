@@ -2,6 +2,7 @@ import numpy as np
 from random import randint
 
 '''
+gets truncated full history trainining period
 input all the b_hat_i_t predictions, np: 365, length_season
 and all the r_i_t full history, np: (365, length_season)
 '''
