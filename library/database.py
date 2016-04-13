@@ -1,6 +1,5 @@
 import MySQLdb
 import os
-import read_csv
 
 '''
 This is a private function that automatically updates the csv files
@@ -13,8 +12,8 @@ class database():
 	def __init__(self, database_name):
 		self.database_name = database_name
 		self.host = "localhost"
-		self.user = "this_user"
-		self.passwd = "password"
+		self.user = "root"
+		self.passwd = "castrated1432"
 		self.directory = "~/Thesis/"
 
 		#database_types

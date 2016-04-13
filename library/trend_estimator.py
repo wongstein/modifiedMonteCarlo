@@ -1,168 +1,149 @@
 from holtwinters import estimator, holtwinters
 import datetime
+import my_time
 import numpy as np
-
+import sys
+import math
 '''
 this is a helper class to make the the trend estimator for the Modified MonteCarlo
 '''
 
 class TrendEstimator():
     #input: (in day order:) check_in: day: s(t), day: s(t), check-IN...
-    def __init__(self, s_of_t_dict):
-        self.last_day_training = datetime.date(2014, 12, 31) #stupidly early
+    def __init__(self, season_stuff_dict, s_of_t):
+        #initialise important tables
+        self.week_averages = season_stuff_dict['week_average']
+        self.t_weekday_converter = s_of_t[1, : ]
+        self.t_season_converter = s_of_t[2, : ]
+
+        self.day_week_median = {}
+        self.season_averages = {0: None, 1: None, 2: None}
+
         #data processing:
-        self.make_s_of_t_matrix(s_of_t_dict)
-        self.make_deseasonalised_tables()
+        self._make_deseasonalised_tables(season_stuff_dict)
+
         #order of deseasonalisation:
         #divide s of t by it's season average
-        s_des1_1 = self.de_season(self.s_of_t_matrix[0,:], self.season_averages)
+        s_des1_1 = self.deseasonalise_season_average(s_of_t[0,:].tolist())
 
         #take out week averages
         #input: key, week_counter= [s_des1, s_des2]
-        s_prime_t = self.de_season(s_des1_1, self.week_averages)
+        s_prime_t = self.deseasonalise_week_average(s_des1_1)
 
-        #take out day averages
-        self.s_des_t = self.de_season(s_prime_t, self.day_of_week_averages)
+        #take out day of week medians
+        s_des_t = self.de_seasonalise_day_week(s_prime_t)
 
         #make holtwinters, hacked it to have just 2 equal seasons, which after deseasonalisation doesn't exit.  But okay
-        self.holtwinters_object = holtwinters.HoltWintersEstimator(self.s_des_t, 3, len(self.s_des_t)/3)
-        #self.holtwinters_object = holtwinters.HoltWintersEstimator(self.s_des_t, 1, len(self.s_des_t))
+        self.holtwinters_object = holtwinters.HoltWintersEstimator(s_des_t, 3, len(s_des_t)/3)
 
-    def make_s_of_t_matrix(self, s_of_t_dict):
-        self.s_of_t_matrix = np.zeros( (3, len(s_of_t_dict[s_of_t_dict.keys()[0]]) ) )
-        x = 0
-        key_counter = -1
 
-        for key, day_data in s_of_t_dict.iteritems():
-            key_counter += 1
-            sorted_days = sorted(day_data.keys())
-            #see if we can find last day
-            if sorted_days[len(sorted_days) - 1] > self.last_day_training:
-                self.last_day_training = sorted_days[len(sorted_days) - 1]
-
-            key_int = 0
-            for day in sorted_days:
-                self.s_of_t_matrix[0, x] = day_data[day] #s_of_t
-
-                self.s_of_t_matrix[1, x] = key_int #season_average_ints
-                key_int += 1
-
-                self.s_of_t_matrix[2, x] = day.weekday()
-
-                x += 1
-
-    def make_deseasonalised_tables(self):
+    def _make_deseasonalised_tables(self, season_trend_stuff):
         #make season averages and also season week data
         #key will hold the index of the first int in the season's range
-        self.season_averages = np.zeros((1, self.s_of_t_matrix.shape[1]))
-        self.week_averages = np.zeros((1, self.s_of_t_matrix.shape[1]))
-        self.day_of_week_averages = np.zeros((1, self.s_of_t_matrix.shape[1]))
+        #
+        #
+        #
+        '''
+        season_trend_stuff = {
+        0:{'day_week_averages':  {0: [], 1:[], 2: [], 3: [], 4: [], 5: [], 6: []}, 'season_averages' = []},
+        1: {'day_week_averages':  {0: [], 1:[], 2: [], 3: [], 4: [], 5: [], 6: []}, 'season_averages' = []},
+        2: {'day_week_averages':  {0: [], 1:[], 2: [], 3: [], 4: [], 5: [], 6: []}, 'season_averages' = []},
 
-        #loop initialization variables
-        season_begining = 0
-        week_beginning = 0
+        'week_averages': np.zeros(1, Monte_Carlo_Base.s_of_t_value.shape[1])}
+        '''
 
-        comparison = self.s_of_t_matrix[0,0]
-        season_total = [comparison]
-        week_tot = [comparison]
-        day_of_week_collection = {self.s_of_t_matrix[2,0]: [self.s_of_t_matrix[0,0]]}
+        for season in [0, 1, 2]:
+            #season_averages
+            season_average = float(sum(season_trend_stuff[season]['average'])) / len(season_trend_stuff[season]['average'])
 
-        for x in range(1, self.s_of_t_matrix.shape[1]):
-            #day of week initialization
-            if self.s_of_t_matrix[2,x] not in day_of_week_collection.keys():
-                day_of_week_collection[self.s_of_t_matrix[2,x]] = []
-            #initialize everything
-            if x == (self.s_of_t_matrix.shape[1] - 1) or self.s_of_t_matrix[1, (x + 1)] == 0:
-                if x == (self.s_of_t_matrix.shape[1] - 1): #this is the last day and we still need to add all the last values
-                    s_of_t = self.s_of_t_matrix[0,x]
-                    week_tot.append(s_of_t)
-                    season_total.append(s_of_t)
-                    day_of_week_collection[self.s_of_t_matrix[2,x]].append(s_of_t)
+            self.season_averages[season] = season_average
 
-            # a new season cluster has started, make calculation
-                #do the day_of_week averages
-                day_averages = {}
-                for day_int, all_list in day_of_week_collection.iteritems():
-                    try:
-                        day_averages[day_int] = float(sum(all_list))/len(all_list)
-                    except ZeroDivisionError:
-                        #because this cluster is less than a consecutive week.
-                        #NEED TO DECIDE if we should then match the day_average to the closest day like this one.  or, just average the day averages for the whole season in general
-                        looking_for_day = True
-                        go_back = 1
-                        while (looking_for_day):
-                            if self.s_of_t_matrix[2,(x - go_back)] == day_int:
-                                last_similar = x - go_back
-                                looking_for_day = False
-                            elif (x - go_back) > -1:
-                                go_back += 1
-
-                        day_averages[day_int] = day_averages[last_similar]
-
-                #season average
-                this_season_average = float(sum(season_total))/len(season_total)
-
-                for i in range(season_begining, x + 1):
-                    self.season_averages[0,i] = this_season_average
-                    self.day_of_week_averages[0,i] = day_averages[ self.s_of_t_matrix[2, i] ]
-
-                #do the week
-                week_average = float(sum(week_tot))/len(week_tot)
-                for i in range(week_beginning, x + 1):
-                    self.week_averages[0, i] = week_average
-
-                week_beginning = x + 1
-                week_tot = []
-
-                #reset the important season stuff
-                season_begining = x + 1
-                season_total = []
-                day_of_week_collection = {}
+            #day of week_averages
+            self.day_week_median[season] = {}
 
 
-            else: #we are still in this season cluster
-                #add to season collection
-                s_of_t = self.s_of_t_matrix[0,x]
+            for day in [0, 1, 2, 3, 4, 5, 6]:
+                if not season_trend_stuff[season]['day_week'][day]:
+                    self.day_week_median[season][day] = 0
+                    continue
 
-                season_total.append(s_of_t)
-                day_of_week_collection[self.s_of_t_matrix[2,x]].append(s_of_t)
+                median = np.median(np.array(season_trend_stuff[season]['day_week'][day]))
 
-                #check to see if this is a new week
-                if (self.s_of_t_matrix[1,x] % 7) == 0: #it is a new week
-                    week_average = float(week_tot)/len(week_tot)
-                    for i in range(week_beginning, x):
-                        self.week_averages[0, i] = week_average
+                self.day_week_median[season][day] = median
 
-                    week_beginning = x + 1
-                    week_tot = []
-                else:
-                    week_tot.append(s_of_t)
 
-                #update important values
 
-    def de_season(self, this_input, type_of_thing):
+    '''
+    this_input is a list
+    '''
+    def de_seasonalise_day_week(self, this_input):
         final = []
 
-        for x in range(0, self.s_of_t_matrix.shape[1]):
-            if this_input[x] == 0 or type_of_thing[0, x] == 0:
+        #dict: season: value
+
+        for t in xrange(0, len(this_input), 1):
+            t_season = int(self.t_season_converter[t])
+            t_day = int(self.t_weekday_converter[t])
+
+            if this_input[t] == 0:
                 final.append(0)
-            else:
-                final.append( float(this_input[x])/type_of_thing[0, x] )
+                continue
+
+            try:
+                final.append(float(this_input[t])/self.day_week_median[t_season][t_day])
+            except ZeroDivisionError: #then this was
+                print "We shouldn't have a zeroDivisionError for day of week averages"
+                sys.exit()
+        return final
+
+    def deseasonalise_season_average(self, this_input):
+        final = []
+        for t in xrange(0, len(this_input), 1):
+            t_season = int(self.t_season_converter[t])
+
+            if this_input[t] == 0:
+                final.append(0)
+                continue
+
+            try:
+                final.append(float(this_input[t])/self.season_averages[t_season])
+            except ZeroDivisionError: #then this was
+                print "We shouldn't have a zeroDivisionError for day of week averages"
+                sys.exit()
+        return final
+
+    def deseasonalise_week_average(self, this_input):
+        this_thing = self.week_averages
+
+        final = []
+
+        for x in xrange(0, len(this_input), 1):
+            #should never be 0
+            to_add = float(this_input[x])/self.week_averages[0, x]
+
+            final.append(to_add)
+
         return final
 
     '''
     day and point of view are ints.  Day is the int after the last full day of trining that we are predicting for.  Point of view is the  perspective we hav after training
+    keep in mind that now, day represents a "best matched day", which exists in the history
+
+    Because of "best_matched_day" strategy, the holtwinter's base time is always the end of it's training (or season size)
+
+    automatically puts in the t_needed
     '''
-    def predict_forecasted_s_t(self, day, point_of_view):
+    def predict_forecasted_s_t(self, day_t):
 
-        if point_of_view < 0 or day < 0:
-            print "you put in values to predict for trend analysis that are within the training period.  Try again"
-            return None
 
-        predicted_s_of_t = self.holtwinters_object.estimate(day, point_of_view)
+        predicted_s_of_t = self.holtwinters_object.estimate(day_t + 1, day_t)
+
+        season = int(self.t_season_converter[day_t])
+        day_week = int(self.t_weekday_converter[day_t])
 
         #think about how to do the day_of_week_averages, which will be messed up
-        reseasonalised = predicted_s_of_t * self.season_averages[0, day] * self.week_averages[0, day] * self.day_of_week_averages[0, (day - 1)]
+        #
+        reseasonalised = predicted_s_of_t * self.season_averages[season] * self.day_week_median[season][day_week] * self.week_averages[0, day_t]
 
         return reseasonalised
 
@@ -181,13 +162,29 @@ def test_all_10():
     print "hello"
 
 def test():
-    #test_input = {datetime.date(2014, 1, 1): {datetime.date(2014, 1, 3): 0, datetime.date(2014, 1, 1): 2, datetime.date(2014, 1, 2): 3, datetime.date(2014, 1, 4): 0, datetime.date(2015, 1,5): 1, datetime.date(2014, 1, 6): 4, datetime.date(2014, 1,7): 2}}
-    #
-    test_input = {datetime.date(2014, 1, 1): {datetime.date(2014, 1, 3): 0, datetime.date(2014, 1, 1): 1, datetime.date(2014, 1, 2): 1, datetime.date(2014, 1, 4): 2, datetime.date(2015, 1,5): 1, datetime.date(2014, 1, 6): 3, datetime.date(2014, 1,7): 2}}
+    import MonteCarlo
+    import json
+    import Historical_Monte
+    import time
+    with open('../data/sample.json') as jsonFile:
+        reservation_dict = json.load(jsonFile)
 
-    my_estimator = TrendEstimator(test_input)
+    #(self, full_training_dict = None, k_iterations = 1)
+    monte_base_start_time = time.time()
+    listing_Monte = MonteCarlo.ModifiedMonteCarlo_Base(reservation_dict)
+    monte_time_cost = time.time() - monte_base_start_time
+
+
+    end_date = datetime.date(2016, 1, 20)
+
+    monte_defined_base = time.time()
+    monte_defined = Historical_Monte.Historical_Monte(listing_Monte,end_date )
+    monte_cost = time.time() - monte_defined_base
 
     prediction = my_estimator.predict_forecasted_s_t(1, 1)
+
+    #expect 1
+    print prediction
 
 if __name__ == '__main__':
     #test_all_10()
