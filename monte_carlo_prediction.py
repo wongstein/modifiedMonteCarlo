@@ -1,4 +1,4 @@
-from library import MonteCarlo
+from library import MonteCarlo_new
 from library import common_database_functions, my_time, classification
 import datetime
 import json
@@ -51,76 +51,13 @@ def get_first_reservations_predictions(listing_id, first_day_of_testing, last_da
 
     return final
 
-'''
-Takes this_day and the point_of_view, and finds a day in year before the point of view that best matches the t this_day.
-
-Matches also the day in the week.  So it'll return the day in the year before the point of view that is at least int of the same day in the week
-'''
-def find_best_match(listing_id, this_day, point_of_view):
-    global reservation_data
-    this_day_designation = int(reservation_data[str(listing_id)][str(this_day)]['k_cluster'])
-
-    view_point = this_day - datetime.timedelta(point_of_view)
-
-    if view_point == this_day:
-        return this_day
-
-    # Find the nth day-of week this day is
-    nth_day_in_week_in_season = 1
-
-    if point_of_view > 7:
-        for x in xrange(7, point_of_view, 7):
-            #go backwards from this_day
-            search_date = this_day - datetime.timedelta(x)
-            search_season = int(reservation_data[str(listing_id)][str(search_date)]['k_cluster'])
-            if search_season == this_day_designation:
-                nth_day_in_week_in_season += 1
-
-
-    #match to best nth season day
-    n_tracker = 0
-    not_found = True
-    timedelta = 0
-    start_search = datetime.date(view_point.year - 1, view_point.month, view_point.day)
-
-    #adjust start_search to match on day of the week
-    while (start_search.weekday() != this_day.weekday()):
-        start_search = start_search + datetime.timedelta(1)
-
-    #find the best day
-    while(not_found):
-        search_date = start_search + datetime.timedelta(timedelta)
-        if search_date >= point_of_view_date:
-            #this would only happen if we are predicting for a day very far away from the point_of_view (> 6 months)
-
-            #return the last most similar day that has the same weekday in the season
-            most_similar = True
-            timedelta = 0
-            while(most_similar):
-                #search_date should preserve the day of the week
-                if int(reservation_data[str(listing_id)][str(search_date)]['k_cluster']) == this_day_designation: #both ints
-                    return search_date
-                else:
-                    timedelta += 7
-
-        search_date_season = int(reservation_data[str(listing_id)][str(search_date)]['k_cluster'])
-        if search_date_season == this_day_designation:
-            n_tracker += 1
-            if n_tracker == nth_day_in_week_in_season:
-                return search_date
-        else:
-            timedelta += 7
-
-
 
 #reservation_dict: occupancy dict predictions for the day, i: [durations predicted]
+#best match day idea already folded into the MonteCarlo implementation
 def fill_predictions_occupancy_on_day(listing_id, monte_carlo_object,occupancy_dict, reservation_dict, this_day, point_of_view = 0):
 
-
-    best_match_day = find_best_match(listing_id, this_day, point_of_view)
-
     #is a list, full of dicts: {i:duration}
-    possible_reservations = monte_carlo_object.predict(best_match_day, reservation_dict[this_day], point_of_view)
+    possible_reservations = monte_carlo_object.predict(this_day, reservation_dict[this_day], point_of_view)
 
     if possible_reservations:
         #take the earliest reservation
@@ -198,7 +135,7 @@ def calculate_results(listing_id, occupancy_predictions_dict):
 Makes the trianing dict for the monte carlo object with a year of data following the point of view
 '''
 
-def one_k_prediction(my_montes, point_of_view):
+def one_k_prediction(my_monte_object, prediction_start, prediction_end):
 
     #reservations come as dict with int: duration_int
     #this_occupancy_dict: day: i: [duration]
@@ -206,18 +143,14 @@ def one_k_prediction(my_montes, point_of_view):
 
     #TEST
     occupancy_dict = {start_date: 1}
-    sorted_days = sorted(my_montes.keys()) #not all days may be saved to my_monte
 
-    for day in sorted_days:
+    for day in my_time._daterange(prediction_start, prediction_end):
         try:
             if occupancy_dict[day] == 1:
                 #skip prediction if this day is already predicted for
                 break
         except KeyError:
             occupancy_dict[day] = 0
-
-        #maintain one year training before point of view
-        point_of_view_day = day - datetime.timedelta(point_of_view)
 
         #NEED TO MAKE START_DATE
         if point_of_view_day > datetime.date(2015, 1, 1):
@@ -242,7 +175,7 @@ training_dict_all will have data for all two years of data, 2014- 2016
 point_of_view must be the datetime date object
 '''
 def single_listing_prediction(experiment_name, start_date, end_date, k_iterations = 1, point_of_view = 0):
-    global reservation_data
+    global reservation_data, point_of_view
     #set up training dict for single listing predictions
 
     location_dict = {1: "Barcelona", 0: "Rome", 6: "Varenna", 11: "Mallorca", 19: "Rotterdam"}
@@ -253,44 +186,29 @@ def single_listing_prediction(experiment_name, start_date, end_date, k_iteration
         results = {}
 
         testing_listings = common_database_functions.get_listings_for_location(int(location_id))
+        testing_start = datetime.date(2015, 1, 1)
+        testing_end = datetime.date(2016, 1, 30)
+
         for listing_id in testing_listings:
 
             occupancy_predictions = {} #will be filled with arbitrary occupancy dicts where the k iteration is the key
             try:
-                listing_monte_base = MonteCarlo.ModifiedMonteCarlo_Base(reservation_data[str(listing_id)])
+                #testing_start, testing_end, full_training_dict = None, point_of_view = 0)
+                my_monte_defined = MonteCarlo_new.ModifiedMonteCarlo_Base(start_date, end_date, reservation_data[str(listing_id)], point_of_view)
+
             except KeyError:
                 #this listing is not available for analysis
                 continue
 
-            #threads = []
-            #do k iterations
-            #threading as an option
-            '''
-            for k in xrange(0, k_iterations, 1):
-                t = threading.Thread(target = one_k_prediction, args = (listing_id, start_date, end_date, point_of_view, ))
-                threads.append(t)
-                occupancy_predictions[k] = t.start()
-            '''
-            #no threading as an option
-            #make all monte_objects for the day
-            my_montes = {}
-            for day in my_time._daterange(start_date, (end_date + datetime.timedelta(1)) ) :
-
-                point_of_view_day = day - datetime.timedelta(point_of_view)
-                my_montes[day] = Historical_Monte.Historical_Monte(monte_base, point_of_view_day, day)
-
-                if not my_montes[day]: #there wasn't enough data to make a good prediction
-                    del my_montes[day]
-
             #do k_iterations
             for k in xrange(0, k_iterations, 1):
-                occupancy_prediction[k] = one_k_prediction(my_montes, point_of_view)
+                occupancy_prediction[k] = one_k_prediction(my_monte_defined, start_date, end_date)
 
                 if occupancy_prediction[k] is False:
                     print "This listing didn't have good data, ", listing_id
                     break
-            #get results
 
+            #get results
             if occupancy_predictions:
                 results[listing_id] = calculate_results(listing_id, occupancy_predictions)
 
@@ -314,7 +232,7 @@ def main():
 
     #experiment 1 (BASELINE BEST), predict from point of view = 0 (for the same day)
     #
-    single_listing_prediction("point-0 one year prediction", datetime.date(2015, 1, 20), datetime.date(2016,1, 20), 10) #to match machine learning
+    single_listing_prediction("point-0 one year prediction", datetime.date(2015, 1, 20), datetime.date(2016,1, 20), k_iterations = 10) #to match machine learning
 
     #experiment 2, point of view for one week before
     single_listing_prediction('point_1 one year prediction', datetime.date(2015, 1, 20), datetime.date(2016,1, 20), k_iterations = 10, point_of_view = 1)
