@@ -7,6 +7,7 @@ import binomial_distribution
 import trend_estimator
 import my_time
 import math
+import time
 
 class ModifiedMonteCarlo():
 
@@ -52,12 +53,13 @@ class ModifiedMonteCarlo():
         self.r_j_t = np.zeros( (1, self.training_length) )
 
         #day: cancellation threshold
-        self.c_season_i_sum = np.zeros((1, self.training_length))
-        self.c_threshold_t = np.zeros((1, self.training_length))
+        #self.c_season_i_sum = np.zeros((1, self.training_length))
+        #self.c_threshold_t = np.zeros((1, self.training_length))
+        self.cancellations = {0: {}, 1: {}, 2: {}}
 
         #season: length: nparray that tracks the sum on day t, wil be transformed later into: day: duration threhold: duration dict
-        self.durations_of_t = {0:{}, 1:{}, 2:{}}
-        self.durations = {}
+        self.durations = {0:{}, 1:{}, 2:{}}
+        #self.durations = {}
 
         if full_training_dict:
             self.fill_global_values(full_training_dict)
@@ -74,9 +76,6 @@ class ModifiedMonteCarlo():
         #make binomial stuff
         self.update_binomial_distribution()
 
-        #fill the important stuff
-        self.make_historically_based_data()
-
     def fill_global_values(self, training_data_set):
 
         sorted_days = sorted([datetime.datetime.strptime(day, "%Y-%m-%d").date() for day in training_data_set.keys()])
@@ -90,8 +89,6 @@ class ModifiedMonteCarlo():
         trend_season_sum_tracker = {0: [], 1: [], 2: []}
 
         #cancellation and duration trackers
-        cancellation_season_tracker = {0: {}, 1: {}, 2: {}}
-        durations_tracker = {0: {}, 1: {}, 2: {}}
 
         for t, day in enumerate(sorted_days):
             #initialisation
@@ -128,11 +125,9 @@ class ModifiedMonteCarlo():
                     #do duration, it should exist
                     duration = (checkout - day ).days
                     try:
-                        durations_tracker[season][duration] += 1
+                        self.durations[season][duration] += 1
                     except KeyError:
-                        durations_tracker[season][duration] = 1
-
-                    self.durations_of_t[t, x] = duration
+                        self.durations[season][duration] = 1
 
                     #increment r_of_j_t, total reservations made regardless
                     #self.r_i_t_over_r_j_t[i, t] += 1
@@ -145,20 +140,11 @@ class ModifiedMonteCarlo():
                             #only increment for successful occupations, aka: "arrived reservation"
                             self.s_of_t[0, t] += 1
 
-            #do durations
-            for duration_length, total_count in durations_tracker[season].iteritems():
-                try:
-                    self.durations_of_t[season][duration_length][0, t] = total_count
-                except KeyError:
-                    self.durations_of_t[season][duration_length] = np.zeros( (1, len(sorted_days)) )
-                    self.durations_of_t[season][duration_length][0, t] = total_count
-
             #do cancellation
             try:
-                cancellation_season_tracker[season][day.weekday()].append(cancellation_count)
+                self.cancellations[season][day.weekday()].append(cancellation_count)
             except KeyError:
-                cancellation_season_tracker[season][day.weekday()] = [cancellation_count]
-            self.c_season_i_sum[0, t] = sum(cancellation_season_tracker[season][day.weekday()])
+                self.cancellations[season][day.weekday()] = [cancellation_count]
 
 
             #do trend stuff now
@@ -196,13 +182,28 @@ class ModifiedMonteCarlo():
 
             #do season sum
             #Never hits this check :)
-            '''
             if self.s_of_t[0,t] == 0:
-                print "test!"
-            '''
+                print "test! monteCarlo_new, 188"
+
             trend_season_sum_tracker[season].append(self.s_of_t[0,t])
             self.s_season_sums[0, t] = sum(trend_season_sum_tracker[season])
             self.season_count[0, t] = len(trend_season_sum_tracker[season])
+
+        #do full season cancellations and durations
+        for season in self.durations.keys():
+            #durations
+            duration_sum = sum(self.durations[season].values())
+            threshold = 100
+            for duration, count in self.durations[season].iteritems():
+                self.durations[season][threshold] = duration
+                threshold -= int(100 * float(count)/duration_sum)
+
+                del self.durations[season][duration]
+
+        for season in self.cancellations.keys():
+            for weekday, full_list in self.cancellations[season].iteritems():
+                self.cancellations[season][weekday] = int(100 * float(sum(full_list))/len(full_list))
+
 
     def update_binomial_distribution(self):
 
@@ -226,10 +227,19 @@ class ModifiedMonteCarlo():
             #do binomial distribution stuff
             proposed_trend = self.trend.predict_forecasted_s_t(t) - 1
 
+            if proposed_trend > 0:
+                print "TEST proposed_trend, ", proposed_trend
+            date_start = time.time()
             #make b_hat_i_t
             b_hat_i_t_column = self.make_b_hat_i_t(point_of_view_date, self.t_season_tracker[0, t], proposed_trend)
 
+            bhat_bottleneck = time.time() - date_start
+            pause = time.time()
             self.binomial_distribution.add_data(b_hat_i_t_column, t, self.r_i_t[:, match_t], self.t_season_tracker[0, t])
+
+            add_data_bottleneck = time.time() - pause
+
+            #print "binomial: ", day, ": make_b_hat_i_t, ", bhat_bottleneck, ", binomial_dstribution.add_data: ", add_data_bottleneck
 
     def find_best_match(self, day, history_start, point_view_date, season):
         search_weekday = day.weekday()
@@ -249,59 +259,6 @@ class ModifiedMonteCarlo():
 
         return i_counter[-1]
 
-
-
-    def make_historically_based_data(self):
-
-        #just for cancellations and durations
-        #
-        #duration_threshold_ duration
-        durations = {}
-
-        for day in my_time._daterange(self.testing_start, self.testing_end):
-            day_t = self.day_int_conversion[day]
-            point_of_view_t = day_t - self.point_of_view
-            history_start = point_of_view_t - 365
-            season = self.t_season_tracker[0, day_t]
-
-            if history_start < 0:
-                history_start = 0
-
-            #make cancellation_threshold
-            sum_cancellations = self.c_season_i_sum[0, point_of_view_t] - self.c_season_i_sum[0, history_start]
-            sum_season_i = self.s_season_i_sums[season][day.weekday()][0, point_of_view_t] - self.s_season_i_sums[season][day.weekday()][0, history_start]
-            self.c_threshold_t[0, day_t] = (float(sum_cancellations)/sum_season_i) * 100
-
-            #do durations
-            season = self.t_season_tracker[0, day_t]
-            if not self.durations_of_t[season].keys(): #there hasn't been any reservation data
-                self.durations[day] = None
-                continue
-
-            sum_durations = 0
-            duration_sums = {}
-            for durations in self.durations_of_t[season].keys():
-                this_duration_sum = self.durations_of_t[season][durations][0, point_of_view_t] - self.durations_of_t[season][durations][0, history_start]
-
-                duration_sums[durations] = this_duration_sum
-                sum_durations += this_duration_sum
-
-            #TEST
-            #happens when there hasn't been any reservations in the history yet
-            if sum_durations == 0:
-                print "HELLO SUm-durations is 0"
-
-            limit = 100
-            self.durations[day] = {}
-            for durations, d_sum in duration_sums.iteritems():
-                threshold = limit - (d_sum/sum_durations * 100)
-                if threshold < 0:
-                    print "something went wrong with the threshold calcuations"
-                    sys.exit()
-
-                self.durations[day][threshold] = durations
-
-
     #point of view specifies the limit of knowledge known for the t used to be predicted
     def make_b_hat_i_t(self, point_of_view_date, season, proposed_trend):
         final = []
@@ -319,14 +276,16 @@ class ModifiedMonteCarlo():
             for t in sorted(all_valid_t):
                 if self.r_j_t[0, t] == 0:
                     continue
+                if self.r_i_t[0,t] > 1:
+                    print "there are multiple reservations being made"
 
                 inner_sum += float(self.r_i_t[i, t])/self.r_j_t[0, t]
 
             b_hat_i_t = (float(inner_sum)/ len(all_valid_t)) * proposed_trend
 
             if math.isnan(b_hat_i_t):
-                    print "we have nan again"
-                    sys.exit()
+                print "we have nan again"
+                sys.exit()
 
             final.append(b_hat_i_t)
 
@@ -373,13 +332,14 @@ class ModifiedMonteCarlo():
     '''
     def _predict_cancellations(self, day, predicted_reservations, i_in_week):
 
-        final = {}
-        t = self.day_int_conversion[day]
-
-        tot_cancellations_threshold = self.c_threshold_t[0, t]
-
         if not predicted_reservations.keys():
             return None
+
+        final = {}
+        t = self.day_int_conversion[day]
+        season = self.t_season_tracker[t]
+
+        cancellation_threshold = self.c_threshold_t[season][day.weekday()]
 
         for i, duration_list in predicted_reservations.iteritems():
             if not durations_list:
@@ -387,7 +347,7 @@ class ModifiedMonteCarlo():
 
             for item in duration_list:
                 choice = randint(1, 101)
-                if choice > tot_cancellations_threshold: #then we keep this
+                if choice >= cancellation_threshold: #then we keep this
                     try:
                         final[i].append(item)
                     except KeyError:
@@ -400,22 +360,22 @@ class ModifiedMonteCarlo():
     expecting prediction_dict to have the keys as threshold values, and the values the actual "predicted value"
     '''
     def _predict_duration(self, day):
-
+        season = self.t_season_tracker[self.day_int_conversion[day]]
         choice = randint(1, 101)
 
         try:
-            sorted_thresholds = sorted(self.durations[day].keys())
+            sorted_thresholds = sorted(self.durations[season].keys())
         except Exception: #not existing
             #there were no durations for this day, which should be possible if predicitng past a point where there has been reservations in the history
             print "check this listing and prediction day because we havne't had any reservation data yet"
             sys.exit()
 
-        for x, threshold in sorted_thresholds:
+        for x, threshold in enumerate(sorted_thresholds):
             try:
                 if sorted_thresholds[x+1] >= choice:
-                    return self.durations[day][threshold]
+                    return self.durations[season][threshold]
             except KeyError: #finished the list already
-                return self.durations[day][threshold]
+                return self.durations[season][threshold]
 
 
     '''
@@ -469,14 +429,7 @@ class ModifiedMonteCarlo():
         return tot_reservations_predicted
 
 
-def test(): #outdated
-    #make sample
-    import Historical_Monte
-
-    #test for 10 days
-    start_date = datetime.date(2015, 1, 20)
-    end_date = datetime.date(2016,1, 30)
-
+def test():
 
     with open('../data/sample.json') as jsonFile:
         reservation_dict = json.load(jsonFile)
@@ -484,11 +437,12 @@ def test(): #outdated
     #(self, full_training_dict = None, k_iterations = 1)
 
     #testing_start, testing_end, full_training_dict = None, point_of_view = 0)
+    start = time.time()
     monte_defined = ModifiedMonteCarlo(datetime.date(2015, 1, 29), datetime.date(2016, 1, 29), reservation_dict, 0)
-
+    monte_stop = time.time() - start
 
     #good prediction should predict 0 for all
-    print "hello, this is a break for MonteCarlo 468"
+    print "hello, this is a break for MonteCarlo 498"
 
 if __name__ == '__main__':
 

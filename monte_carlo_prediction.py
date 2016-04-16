@@ -135,7 +135,7 @@ def calculate_results(listing_id, occupancy_predictions_dict):
 Makes the trianing dict for the monte carlo object with a year of data following the point of view
 '''
 
-def one_k_prediction(my_monte_object, prediction_start, prediction_end):
+def one_k_prediction(my_monte_object, prediction_start, prediction_end, point_of_view):
 
     #reservations come as dict with int: duration_int
     #this_occupancy_dict: day: i: [duration]
@@ -202,7 +202,7 @@ def single_listing_prediction(experiment_name, start_date, end_date, k_iteration
 
             #do k_iterations
             for k in xrange(0, k_iterations, 1):
-                occupancy_prediction[k] = one_k_prediction(my_monte_defined, start_date, end_date)
+                occupancy_prediction[k] = one_k_prediction(my_monte_defined, start_date, end_date, point_of_view)
 
                 if occupancy_prediction[k] is False:
                     print "This listing didn't have good data, ", listing_id
@@ -228,7 +228,6 @@ def single_listing_prediction(experiment_name, start_date, end_date, k_iteration
 
 
 def main():
-
 
     #experiment 1 (BASELINE BEST), predict from point of view = 0 (for the same day)
     #
