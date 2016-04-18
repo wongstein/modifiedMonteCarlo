@@ -1,108 +1,5 @@
-from sklearn.svm import LinearSVC
-from sklearn.neighbors import KNeighborsClassifier
-from sklearn.neighbors import NearestCentroid
-from sklearn.ensemble import RandomForestClassifier
-from scipy.sparse import coo_matrix
-from sklearn import tree
-from sklearn import svm
-import numpy as np
 import database
 
-class classification():
-    model = None
-    model_name = ""
-
-    def __init__(self, choice):
-        self.model_name = choice
-
-    def train_with(self, training_data_list, answers):
-        #put data in right format
-        training_data = self.get_sparse_matrix(training_data_list)
-
-        if training_data is not False:
-
-        #make model
-            if self.model_name == "random_forest":
-                forest = RandomForestClassifier(n_estimators=100)
-                self.model = forest.fit(training_data.todense(), answers)
-            elif self.model_name == "centroid_prediction":
-                clf = NearestCentroid()
-                self.model = clf.fit(training_data, answers)
-            elif self.model_name == "linearSVC":
-                SVC = LinearSVC()
-                self.model = SVC.fit(training_data.todense(), answers)
-            elif self.model_name == "nearest_neighbor":
-                near = KNeighborsClassifier()
-                self.model = near.fit(training_data.todense(), answers)
-            elif self.model_name == "decision_tree":
-                clf = tree.DecisionTreeClassifier()
-                self.model = clf.fit(training_data.todense(), answers)
-            elif self.model_name == "svc":
-                clf = svm.SVC()
-                self.model = clf.fit(training_data, answers)
-
-    def predict(self, testing_data):
-        testing_data_matrix = self.get_sparse_matrix(testing_data)
-
-        if testing_data_matrix is not False and self.model:
-
-            if self.model_name in ["random_forest", "linearSVC", "nearest_neighbor", "decision_tree"]:
-                return self.model.predict(testing_data_matrix.todense())
-            else:
-                return self.model.predict(testing_data_matrix)
-
-        else:
-            #for debugging
-            return False
-
-    def instructions(self):
-        print "My model_name is ", self.model_name
-        print "to change the model, use: classify_with(self, model_name)"
-        print "model names are: random_forest, centroid_prediction, linearSVC, nearest_neighbor, decision_tree, svc"
-        print "evaluation "
-
-    '''
-    hopefully gives the sparse matrix
-    input is list of list
-    '''
-    def get_sparse_matrix(self, mydata):
-        row = []
-        col = []
-        data = []
-
-        for x, entry in enumerate(mydata):
-            #structure of doc is a list of lists.
-            for i, item in enumerate(entry):
-                #item structure: [word index (row value), word_count]
-                row.append(x)
-                col.append(i)
-                data.append(item)
-
-        #convert to np array
-        row = np.asarray(row)
-        col = np.asarray(col)
-        data = np.asarray(data)
-        try:
-            return coo_matrix((data, (row, col)))
-        except Exception as e:
-            print e
-            print "row, " , row
-            print "col, " , col
-            print "len of data ", len(data)
-            return False
-
-
-'''
-TESTING
-expecting binary inputs from prediction and classification
-0 is false
-1 is true
-'''
-
-'''
-the following methods takes a dictionary result of test_prediction to calculate measuring
-values
-'''
 class results():
     def __init__(self, prediction, classification):
         self.true_true = 0
@@ -192,7 +89,7 @@ class results():
 
 
 #rewritten for monte_carlo prediction requirements
-def save_to_database(table_name, experiment_name, city_name, full_dict, method =True):
+def save_to_database(table_name, experiment_name, city_name, full_dict):
     thesis_data = database.database("Thesis")
 
     #delete similar entries
@@ -206,12 +103,12 @@ def save_to_database(table_name, experiment_name, city_name, full_dict, method =
     if full_dict and isinstance(full_dict.keys()[0], long): #for individual storage
         insert_query = "INSERT INTO " + table_name + "  VALUES('%s','%s',%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
         for listing_id, results in full_dict.iteritems():
-            #experiment ,  city , listing_id, method, true_true, true_false, false_true, false_false, occupancy_precision, occupancy_recall, empty_precision, empty_recall, occupancy_fOne, empty_fOne, correct_overall
+            #experiment ,  city , listing_id, true_true, true_false, false_true, false_false, occupancy_precision, occupancy_recall, empty_precision, empty_recall, occupancy_fOne, empty_fOne, correct_overall
             to_insert = [experiment_name, city_name, listing_id]
 
             for this_thing in ["true_true", "true_false", "false_true", "false_false", "occupancy_precision", "occupancy_recall", "empty_precision", "empty_recall", "occupancy_fOne", "empty_fOne", "correct_overall"]:
                 if results[this_thing]:
-                    to_insert.append(method_results[this_thing])
+                    to_insert.append(results[this_thing])
                 else:
                     to_insert.append("null")
             #print (insert_query % to_insert)
@@ -221,9 +118,9 @@ def save_to_database(table_name, experiment_name, city_name, full_dict, method =
         #experiment ,  city, occupancy_precision, occupancy_recall, empty_precision, empty_recall, occupancy_fOne, empty_fOne,
         to_insert = [experiment_name, city_name]
         for this_thing in ["occupancy_precision", "occupancy_recall", "empty_precision", "empty_recall", "occupancy_fOne", "empty_fOne"]:
-            if full_dict[this_thing]:
-                to_insert.append(method_results[this_thing])
-            else:
+            if this_thing in full_dict.keys() and full_dict[this_thing]:
+                to_insert.append(full_dict[this_thing])
+            elif not full_dict[this_thing]:
                 to_insert.append("null")
 
         thesis_data.execute(insert_query % tuple(to_insert))
@@ -231,6 +128,13 @@ def save_to_database(table_name, experiment_name, city_name, full_dict, method =
     thesis_data.destroy_connection()
 
 
+def test():
+    sample = {'empty_fOne': 0.9689265536723164, 'empty_precision': 0.9397260273972603, 'occupancy_precision': None, 'false_false': 22, 'correct_overall': 0.9397260273972603, 'occupancy_fOne': None, 'empty_recall': 1.0, 'true_false': 343, 'false_true': 0, 'true_true': 0, 'occupancy_recall': 0.0}
+
+    save_to_database("monte_carlo_average_results", "save_to_database_test", "test", sample)
+
+if __name__ == '__main__':
+    test()
 
 
 

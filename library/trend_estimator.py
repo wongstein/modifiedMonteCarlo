@@ -25,8 +25,6 @@ class TrendEstimator():
         #make holtwinters, hacked it to have just 3 equal seasons, which after deseasonalisation doesn't exit.  But okay
         self.holtwinters_object = holtwinters.HoltWintersEstimator(s_des_t, 3, len(s_des_t)/3)
 
-        #test
-        print "hello, this is a possible break for trend_estimator line 28"
 
     '''
     s_des_t = s_of_t/ s_week_average/ s_week_i_average/ season_average
@@ -49,7 +47,7 @@ class TrendEstimator():
             point_view_date_t = (point_view_date - datetime.date(2014, 1, 1)).days
 
             #if after finding the point of view, there isn't enough history, fuck it take the normal date, we aren't predicting for this day anyways and our point of view is the day
-            if point_view_date_t < 0:
+            if point_view_date_t <= 0:
                 point_view_date_t = (day - datetime.date(2014, 1, 1)).days
                 point_view_date = day
 
@@ -72,7 +70,13 @@ class TrendEstimator():
             #take out season average
 
             sorted_season = sorted([entry for entry in season_day_tracker[season] if entry >= history_start_t and entry <= point_view_date_t])
+
+            #sometimes there is not enought data for this
+            if not sorted_season:
+                continue
+
             season_length = len(sorted_season)
+
             season_end_t = sorted_season[season_length - 1]
             season_start_t = sorted_season[0]
 
@@ -96,7 +100,11 @@ class TrendEstimator():
             i_count = (s_sum_i[season][day.weekday()][1, point_view_date_t] - s_sum_i[season][day.weekday()][1, history_start_t])
 
             if i_count == 0:
-                print "i_count is 0"
+                #hack this real quick, sometimes when we predict a bit too far int he future, there hasn't been a day in the predicted date's season.  But there shouldn't be a sum_i either.  So we will just call it 0, or in this case 1 because of the centering
+
+                i_count = 1
+                sum_i = 1
+
             i_average = float(sum_i)/i_count
 
             self.week_i_average[0, t] = i_average

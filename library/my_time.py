@@ -5,7 +5,7 @@ takes datetime for start_date and end date
 inclues the end dates
 '''
 def _daterange(start_date, end_date):
-    for n in range(int ((end_date - start_date).days) ): #weird bug, missing the last day, this is a hack
+    for n in range(int ((end_date - start_date).days) ):
         yield start_date + datetime.timedelta(n)
 
 
