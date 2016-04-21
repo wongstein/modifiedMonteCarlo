@@ -25,7 +25,8 @@ class ModifiedMonteCarlo():
     #
     #testing_start >= point_view_date
 
-    def __init__(self, testing_start, testing_end, full_training_dict = None, point_of_view = 0):
+    def __init__(self, listing_id, testing_start, testing_end, full_training_dict = None, point_of_view = 0):
+        self.listing_id = listing_id
         #big class variables
         self.training_length = len(full_training_dict.keys())
         self.testing_end = testing_end
@@ -53,13 +54,10 @@ class ModifiedMonteCarlo():
         self.r_j_t = np.zeros( (1, self.training_length) )
 
         #day: cancellation threshold
-        #self.c_season_i_sum = np.zeros((1, self.training_length))
-        #self.c_threshold_t = np.zeros((1, self.training_length))
         self.cancellations = {0: {}, 1: {}, 2: {}}
 
         #season: length: nparray that tracks the sum on day t, wil be transformed later into: day: duration threhold: duration dict
         self.durations = {0:{}, 1:{}, 2:{}}
-        #self.durations = {}
 
         if full_training_dict:
             self.fill_global_values(full_training_dict)
@@ -116,11 +114,12 @@ class ModifiedMonteCarlo():
 
                     i = (day - enquiry_day).days
 
+                    #the make monte carlo reservation structure didn't have the proper filter controls, so it has some non-valid reservations that were created in the database after checkin.  This problem is not in the occupancy dict, so we can safely ignore them
+                    if i < 0:
+                        continue
+
                     #increment r_i_t
                     self.r_i_t[i, t] += 1
-                    if i < 0:
-                        print "input wrong for enquiry day in fill_tables_by_cluster"
-                        #sys.exit()
 
                     #do duration, it should exist
                     duration = (checkout - day ).days
@@ -194,15 +193,26 @@ class ModifiedMonteCarlo():
             #durations
             duration_sum = sum(self.durations[season].values())
             threshold = 100
-            for duration, count in self.durations[season].iteritems():
-                self.durations[season][threshold] = duration
+            for duration in self.durations[season].keys():
+                #test
+                count = self.durations[season][duration]
+                if int(100 * float(count)/duration_sum) < 1 and int(100 * float(count)/duration_sum) > 0:
+                    print "duration threshold very small, ", int(100 * float(count)/duration_sum)
+
                 threshold -= int(100 * float(count)/duration_sum)
+
+                self.durations[season][threshold] = duration
 
                 del self.durations[season][duration]
 
         for season in self.cancellations.keys():
             for weekday, full_list in self.cancellations[season].iteritems():
+
                 self.cancellations[season][weekday] = int(100 * float(sum(full_list))/len(full_list))
+
+                #TEST
+                if self.cancellations[season][weekday] < 1 and self.cancellations[season][weekday] > 0:
+                    print "cancellation threshold very small, ", int(100 * float(sum(full_list))/len(full_list))
 
 
     def update_binomial_distribution(self):
@@ -225,10 +235,8 @@ class ModifiedMonteCarlo():
             match_t = (match_day - datetime.date(2014, 1, 1)).days
 
             #do binomial distribution stuff
-            proposed_trend = self.trend.predict_forecasted_s_t(t) - 1
+            proposed_trend = self.trend.predict_forecasted_s_t(day) - 1
 
-            if proposed_trend > 0:
-                print "TEST proposed_trend, ", proposed_trend
             date_start = time.time()
             #make b_hat_i_t
             b_hat_i_t_column = self.make_b_hat_i_t(point_of_view_date, self.t_season_tracker[0, t], proposed_trend)
@@ -302,7 +310,7 @@ class ModifiedMonteCarlo():
     '''
     def _predict_reservations(self, day, i):
         this_t = self.day_int_conversion[day]
-        season = self.t_seasons[0, this_t]
+        season = self.t_season_tracker[0, this_t]
         predicted_reservations = 0
 
         #figure out year_t
@@ -316,11 +324,11 @@ class ModifiedMonteCarlo():
             return 0
 
         #probability is the probabiliyt that the reservation will materialise for day t, i days in advance
-        threshold = int(n_p_dict['p'] * 100)
-
+        probability_range = int(1 /n_p_dict['p'])
+        threshold = n_p_dict['p'] * probability_range
         for x in xrange(0, n_p_dict['n'], 1):
             random_pick = randint(1, 100) #includes the ends
-            if random_pick < threshold:
+            if random_pick <= threshold:
                 predicted_reservations += 1
 
         return predicted_reservations
@@ -337,12 +345,12 @@ class ModifiedMonteCarlo():
 
         final = {}
         t = self.day_int_conversion[day]
-        season = self.t_season_tracker[t]
+        season = self.t_season_tracker[0, t]
 
-        cancellation_threshold = self.c_threshold_t[season][day.weekday()]
+        cancellation_threshold = self.cancellations[season][day.weekday()]
 
         for i, duration_list in predicted_reservations.iteritems():
-            if not durations_list:
+            if not duration_list:
                 continue
 
             for item in duration_list:
@@ -359,8 +367,7 @@ class ModifiedMonteCarlo():
     '''
     expecting prediction_dict to have the keys as threshold values, and the values the actual "predicted value"
     '''
-    def _predict_duration(self, day):
-        season = self.t_season_tracker[self.day_int_conversion[day]]
+    def _predict_duration(self, season):
         choice = randint(1, 101)
 
         try:
@@ -389,7 +396,7 @@ class ModifiedMonteCarlo():
 
     day_known_reservation_dict: i: [durations]]
     '''
-    def predict(self, matched_day, day_known_reservations_dict, point_of_view = 0):
+    def predict(self, day, day_known_reservations_dict):
         #must be datetime object
 
         #the key is i before checkin day
@@ -398,8 +405,8 @@ class ModifiedMonteCarlo():
         else:
             tot_reservations_predicted = {}
 
-        for i in xrange(0, point_of_view, 1):
-            proposed_reservations = self._predict_reservations(matched_day, i)
+        for i in xrange(0, self.point_of_view, 1):
+            proposed_reservations = self._predict_reservations(day, i)
             if proposed_reservations < 0:
                 print "we have a negative number of reservations proposed."
                 sys.exit()
@@ -416,33 +423,41 @@ class ModifiedMonteCarlo():
             return 0
 
         #make cancelations
-        season = self.t_seasons[0, int( (matched_day - self.start_date).days )]
+        season = self.t_season_tracker[0, self.day_int_conversion[day]]
 
-        tot_reservations_predicted = self._predict_cancellations(season, tot_reservations_predicted, matched_day.weekday())
+        tot_reservations_predicted = self._predict_cancellations(day,tot_reservations_predicted, day.weekday())
 
         #make durations
-        for i, duration_list in tot_reservations_predicted:
-            for item in durations_list:
-                if duration == 0:
-                    duration = self._predict_duration(season)
+        for i, duration_list in tot_reservations_predicted.iteritems():
+            if not duration_list:
+                continue
+
+            #if there is a reservation without a duration assigned, assign one
+            for item in duration_list:
+                if item == 0:
+                    item = self._predict_duration(season)
         #returns r
         return tot_reservations_predicted
 
 
 def test():
 
-    with open('../data/sample.json') as jsonFile:
+    with open('../data/debug_this.json') as jsonFile:
         reservation_dict = json.load(jsonFile)
 
     #(self, full_training_dict = None, k_iterations = 1)
 
     #testing_start, testing_end, full_training_dict = None, point_of_view = 0)
     start = time.time()
-    monte_defined = ModifiedMonteCarlo(datetime.date(2015, 1, 29), datetime.date(2016, 1, 29), reservation_dict, 0)
+    monte_defined = ModifiedMonteCarlo(100, datetime.date(2015, 1, 29), datetime.date(2016, 1, 29), reservation_dict, 10)
     monte_stop = time.time() - start
 
-    #good prediction should predict 0 for all
-    print "hello, this is a break for MonteCarlo 498"
+    #13 seconds
+    print "time cost for object creation, ",  monte_stop
+
+    #do a prediction
+    predict_start = time.time()
+    predicted_reservations = monte_defined.predict(datetime.date(2015, 4, 10), day_known_reservations_dict)
 
 if __name__ == '__main__':
 

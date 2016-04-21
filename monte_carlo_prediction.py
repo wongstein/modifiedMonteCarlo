@@ -4,7 +4,7 @@ import datetime
 import json
 import pandas as pd
 import time
-import threading
+from multiprocessing import Process
 
 '''
 Every seperate k-means clustered season shall be it's own training set
@@ -26,6 +26,10 @@ with open('data/reservation_dict_combined.json') as jsonFile:
 
 with open('data/occupancy_dict.json') as jsonFile:
     occupancy_dict = json.load(jsonFile)
+
+start_date = None
+end_date = None
+point_of_view = None
 
 def get_first_reservations_predictions(listing_id, first_day_of_testing, last_day_testing, point_of_view = 0):
     global reservation_data
@@ -163,6 +167,30 @@ def one_k_prediction(listing_id, my_monte_object, prediction_start, prediction_e
 
     return occupancy_dict
 
+
+def one_listing_year_prediction(listing_id, listing_reservation_data, start_date, end_date, point_of_view, results_dict):
+    occupancy_prediction = {} #will be filled with arbitrary occupancy dicts where the k iteration is the key
+
+    try:
+        my_monte_defined = MonteCarlo_new.ModifiedMonteCarlo(listing_id, start_date, end_date, listing_reservation_data, point_of_view)
+
+    except KeyError:
+        #this listing is not available for analysis
+        return
+
+    #do k_iterations
+    for k in xrange(0, 100, 1):
+        occupancy_prediction[k] = one_k_prediction(listing_id, my_monte_defined, start_date, end_date, point_of_view)
+
+        if occupancy_prediction[k] is False:
+            print "This listing didn't have good data, ", listing_id
+            break
+
+    #get results, which returns a tuple: (listing_id, confusion matrix)
+    if occupancy_prediction:
+        these_results = calculate_results(listing_id, occupancy_prediction, start_date, end_date)
+        results_dict[listing_id] = these_results
+
 '''
 date inputs can be datetime objects
 
@@ -172,55 +200,56 @@ training_dict_all will have data for all two years of data, 2014- 2016
 
 point_of_view must be the datetime date object
 '''
-def single_listing_prediction(experiment_name, start_date, end_date, k_iterations = 1, point_of_view = 0):
+def single_listing_prediction(experiment_name, start, end, k_iterations = 1, PofV = 0):
     global reservation_data
+
+
     #set up training dict for single listing predictions
 
     location_dict = {1: "Barcelona", 0: "Rome", 6: "Varenna", 11: "Mallorca", 19: "Rotterdam"}
     all_results = {}
     for location_id in ['0', '1', '19']:
-    #for location_id in ['0']:
-        print "On location ", location_dict[int(location_id)], " point of view: ", point_of_view
-        #results: listing_id: results
         results = {}
+        print "On location ", location_dict[int(location_id)], " point of view: ", point_of_view
 
         testing_listings = common_database_functions.get_listings_for_location(int(location_id))
 
         testing_listings = [entry for entry in testing_listings if str(entry) in reservation_data.keys()]
 
-        for listing_id in testing_listings:
-            start_time = time.time()
-            occupancy_prediction = {} #will be filled with arbitrary occupancy dicts where the k iteration is the key
-            try:
-                my_monte_defined = MonteCarlo_new.ModifiedMonteCarlo(listing_id, start_date, end_date, reservation_data[str(listing_id)], point_of_view)
+        start_time = time.time()
 
-            except KeyError:
-                #this listing is not available for analysis
-                continue
+        #get stuff ready for multi processing
+        listing_chunks = []
+        processes = 5
+        for x in xrange(0, len(testing_listings), processes):
+            small_chunk = []
+            for y in xrange(0, processes, 1):
+                try:
+                    small_chunk.append(testing_listings[x + y])
+                except IndexError: #then it's finished
+                    listing_chunks.append(small_chunk)
+                    continue
+            listing_chunks.append(small_chunk)
 
-            #do k_iterations
-            for k in xrange(0, k_iterations, 1):
-                occupancy_prediction[k] = one_k_prediction(listing_id, my_monte_defined, start_date, end_date, point_of_view)
+        results = {}
 
-                if occupancy_prediction[k] is False:
-                    print "This listing didn't have good data, ", listing_id
-                    break
+        for id_chunk in listing_chunks:
+            #one_listing_year_prediction(results, listing_id)
+            #
+            for listing_id in id_chunk:
+                p = Process(target = one_listing_year_prediction, args = (listing_id, reservation_data[str(listing_id)], start, end, PofV, results))
+                p.start()
 
-            #get results
-            if occupancy_prediction:
-                results[listing_id] = calculate_results(listing_id, occupancy_prediction, start_date, end_date)
-            print "on listing, ", listing_id, ": ", (time.time() - start_time)
+            #prevent more than 5 processes running at same time and also add enough joins so that
+            p.join()
 
-            print results[listing_id]
-
-        location_dict = {1: "Barcelona", 0: "Rome", 19: "Rotterdam"}
-        '''
-        do results analysis
-        results: id: {scores: values} where scores are confusion matrix and
-        '''
+        #for the last straggling process, I can't see them being more than 3 seconds behind
+        time.sleep(5)
         classification.save_to_database("monte_carlo_individual_results", experiment_name, location_dict[int(location_id)], results)
 
         all_results[location_dict[int(location_id)]] = results_averaging(results)
+
+
 
         classification.save_to_database("monte_carlo_average_results", experiment_name, location_dict[int(location_id)], all_results[location_dict[int(location_id)]])
 
@@ -236,21 +265,21 @@ def main():
     single_listing_prediction("point-0 one year prediction", datetime.date(2015, 1, 20), datetime.date(2016,1, 20), k_iterations = 100) #to match machine learning
 
     #experiment 2, point of view for one week before
-    single_listing_prediction('point_1 one year prediction', datetime.date(2015, 1, 20), datetime.date(2016,1, 20), k_iterations = 100, point_of_view = 1)
+    single_listing_prediction('point_1 one year prediction', datetime.date(2015, 1, 20), datetime.date(2016,1, 20), k_iterations = 100, PofV = 1)
 
     #experiment 4
-    single_listing_prediction('point_3 one year prediction', datetime.date(2015, 1, 20), datetime.date(2016,1, 20), k_iterations = 100, point_of_view = 3)
+    single_listing_prediction('point_3 one year prediction', datetime.date(2015, 1, 20), datetime.date(2016,1, 20), k_iterations = 100, PofV = 3)
 
-    single_listing_prediction('point_7 one year prediction', datetime.date(2015, 1, 20), datetime.date(2016,1, 20), k_iterations = 100, point_of_view = 1)
+    single_listing_prediction('point_7 one year prediction', datetime.date(2015, 1, 20), datetime.date(2016,1, 20), k_iterations = 100, PofV = 7)
 
     #one month ahead
-    single_listing_prediction('point_30 one year prediction', datetime.date(2015, 1, 20), datetime.date(2016,1, 20), k_iterations = 100, point_of_view = 30)
+    single_listing_prediction('point_30 one year prediction', datetime.date(2015, 1, 20), datetime.date(2016,1, 20), k_iterations = 100, PofV = 30)
 
     #2 months ahead
-    single_listing_prediction('point_60 one year prediction', datetime.date(2015, 1, 20), datetime.date(2016,1, 20), k_iterations = 100, point_of_view = 60)
+    single_listing_prediction('point_60 one year prediction', datetime.date(2015, 1, 20), datetime.date(2016,1, 20), k_iterations = 100, PofV = 60)
 
     #3 months ahead
-    single_listing_prediction('point_90 one year prediction', datetime.date(2015, 1, 20), datetime.date(2016,1, 20), k_iterations = 100, point_of_view = 90)
+    single_listing_prediction('point_90 one year prediction', datetime.date(2015, 1, 20), datetime.date(2016,1, 20), k_iterations = 100, PofV = 90)
 
 if __name__ == '__main__':
     main()

@@ -18,6 +18,8 @@ class TrendEstimator():
         self.week_i_average = None
         self.week_average = None
 
+        #because of the sparsity of data issue, this will internally match the day to the nearest "t" in the trend
+        self.day_trend_t_tracker = {}
 
         s_des_t = self.make_s_des_t(point_of_view, season_day_tracker,t_season_tracker, s_of_t, s_sum_average, s_sum_i, s_week_average)
 
@@ -73,6 +75,7 @@ class TrendEstimator():
 
             #sometimes there is not enought data for this
             if not sorted_season:
+                self.day_trend_t_tracker[day] = None
                 continue
 
             season_length = len(sorted_season)
@@ -111,6 +114,7 @@ class TrendEstimator():
             this_s_des_t = s_prime_t/i_average
 
             s_des_t.append(this_s_des_t)
+            self.day_trend_t_tracker[day] = len(s_des_t)
 
             t += 1
 
@@ -139,13 +143,24 @@ class TrendEstimator():
         return i_counter[-1]
 
     '''
-    can take date time object
+    Takes in a date time object as day
     '''
     def predict_forecasted_s_t(self, day):
+        '''
         if not isinstance(day, int):
             this_t = (day - datetime.date(2014, 1, 1)).days
         else:
             this_t = day
+        '''
+        try:
+            this_t = self.day_trend_t_tracker[day]
+        except KeyError:
+            print "day not in the records for this trend, trend_estimator 158"
+            print day
+            sys.exit()
+        if this_t is None:
+            print "This day has a trend t that didn't have enough data, fix this."
+            sys.exit()
 
         predicted_s_of_t = self.holtwinters_object.estimate(this_t + 1, this_t)
 
@@ -167,7 +182,7 @@ def test_all_10():
 
     my_estimator = TrendEstimator(test_input)
 
-    prediction = my_estimator.predict_forecasted_s_t(2, 2)
+    prediction = my_estimator.predict_forecasted_s_t(datetime.date(2015, 4, 30))
 
     #expect prediction to be 10
 
@@ -176,14 +191,14 @@ def test():
     import json
     import time
 
-    with open('../data/sample.json') as jsonFile:
+    with open('../data/debug_this.json') as jsonFile:
         reservation_dict = json.load(jsonFile)
 
-    monte_defined_base = time.time()
+    #(self, full_training_dict = None, k_iterations = 1)
 
-    monte_defined = MonteCarlo_new.ModifiedMonteCarlo(datetime.date(2015, 3, 1), datetime.date(2015, 3, 30), reservation_dict, 0)
-
-    monte_cost = time.time() - monte_defined_base
+    #testing_start, testing_end, full_training_dict = None, point_of_view = 0)
+    start = time.time()
+    monte_defined = MonteCarlo_new.ModifiedMonteCarlo(100, datetime.date(2015, 1, 29), datetime.date(2016, 1, 29), reservation_dict, 90)
 
     prediction = monte_defined.trend.predict_forecasted_s_t(datetime.date(2015, 1, 10))
 
