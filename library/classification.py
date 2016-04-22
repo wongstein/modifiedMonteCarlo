@@ -1,4 +1,4 @@
-import database
+#import database
 
 class results():
     def __init__(self, prediction, classification):
@@ -86,46 +86,6 @@ class results():
     def get_results(self):
 
         return {"true_true": self.true_true, "true_false": self.true_false, "false_false": self.false_false, "false_true": self.false_true, "occupancy_precision": self.occupancy_precision, "empty_precision": self.empty_precision, "correct_overall": self.overall, "occupancy_recall": self.occupancy_recall, "empty_recall": self.empty_recall, "occupancy_fOne": self.occupancy_fOne, "empty_fOne": self.empty_fOne}
-
-
-#rewritten for monte_carlo prediction requirements
-def save_to_database(table_name, experiment_name, city_name, full_dict):
-    thesis_data = database.database("Thesis")
-
-    #delete similar entries
-    query = "DELETE FROM `" + table_name + "` WHERE `city` = '" + city_name + "' AND `experiment` = '" + experiment_name + "';"
-    #print query
-    thesis_data.execute(query)
-
-    print "saving to database " + table_name + " experiment results: " + experiment_name
-
-    #put entries in, then the keys are lists and what I want to store are the true_true,
-    if full_dict and isinstance(full_dict.keys()[0], long): #for individual storage
-        insert_query = "INSERT INTO " + table_name + "  VALUES('%s','%s',%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
-        for listing_id, results in full_dict.iteritems():
-            #experiment ,  city , listing_id, true_true, true_false, false_true, false_false, occupancy_precision, occupancy_recall, empty_precision, empty_recall, occupancy_fOne, empty_fOne, correct_overall
-            to_insert = [experiment_name, city_name, listing_id]
-
-            for this_thing in ["true_true", "true_false", "false_true", "false_false", "occupancy_precision", "occupancy_recall", "empty_precision", "empty_recall", "occupancy_fOne", "empty_fOne", "correct_overall"]:
-                if results[this_thing]:
-                    to_insert.append(results[this_thing])
-                else:
-                    to_insert.append("null")
-            #print (insert_query % to_insert)
-            thesis_data.execute(insert_query % tuple(to_insert))
-    elif full_dict:
-        insert_query = "INSERT INTO " + table_name + " VALUES('%s','%s',%s,%s,%s,%s,%s, %s)"
-        #experiment ,  city, occupancy_precision, occupancy_recall, empty_precision, empty_recall, occupancy_fOne, empty_fOne,
-        to_insert = [experiment_name, city_name]
-        for this_thing in ["occupancy_precision", "occupancy_recall", "empty_precision", "empty_recall", "occupancy_fOne", "empty_fOne"]:
-            if this_thing in full_dict.keys() and full_dict[this_thing]:
-                to_insert.append(full_dict[this_thing])
-            elif not full_dict[this_thing]:
-                to_insert.append("null")
-
-        thesis_data.execute(insert_query % tuple(to_insert))
-
-    thesis_data.destroy_connection()
 
 
 def test():
