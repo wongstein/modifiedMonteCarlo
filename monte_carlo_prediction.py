@@ -4,7 +4,7 @@ import datetime
 import json
 import pandas as pd
 import time
-from multiprocessing import Process
+from multiprocessing import Process, Queue
 
 '''
 Every seperate k-means clustered season shall be it's own training set
@@ -168,7 +168,7 @@ def one_k_prediction(listing_id, my_monte_object, prediction_start, prediction_e
     return occupancy_dict
 
 
-def one_listing_year_prediction(listing_id, listing_reservation_data, start_date, end_date, point_of_view, results_dict):
+def one_listing_year_prediction(listing_id, listing_reservation_data, start_date, end_date, point_of_view, q):
     occupancy_prediction = {} #will be filled with arbitrary occupancy dicts where the k iteration is the key
 
     try:
@@ -189,7 +189,8 @@ def one_listing_year_prediction(listing_id, listing_reservation_data, start_date
     #get results, which returns a tuple: (listing_id, confusion matrix)
     if occupancy_prediction:
         these_results = calculate_results(listing_id, occupancy_prediction, start_date, end_date)
-        results_dict[listing_id] = these_results
+        #print "on listing ", listing_id, " with: ", these_results
+        q.put((listing_id, these_results))
 
 '''
 date inputs can be datetime objects
@@ -232,24 +233,28 @@ def single_listing_prediction(experiment_name, start, end, k_iterations = 1, Pof
             listing_chunks.append(small_chunk)
 
         results = {}
-
         for id_chunk in listing_chunks:
             #one_listing_year_prediction(results, listing_id)
             #
+            #sadly seems that passing in a dict does not work, must use process queue
+            q = Queue()
+            process_list = []
+
+            start_time = time.time()
             for listing_id in id_chunk:
-                p = Process(target = one_listing_year_prediction, args = (listing_id, reservation_data[str(listing_id)], start, end, PofV, results))
+                p = Process(target = one_listing_year_prediction, args = (listing_id, reservation_data[str(listing_id)], start, end, PofV, q))
+                process_list.append(p)
                 p.start()
 
-            #prevent more than 5 processes running at same time and also add enough joins so that
-            p.join()
+            for process_tuple in process_list:
+                return_tuple = q.get()
+                results[return_tuple[0]] = return_tuple[1]
+                process_tuple.join()
 
         #for the last straggling process, I can't see them being more than 3 seconds behind
-        time.sleep(5)
         classification.save_to_database("monte_carlo_individual_results", experiment_name, location_dict[int(location_id)], results)
 
         all_results[location_dict[int(location_id)]] = results_averaging(results)
-
-
 
         classification.save_to_database("monte_carlo_average_results", experiment_name, location_dict[int(location_id)], all_results[location_dict[int(location_id)]])
 
