@@ -1,6 +1,6 @@
 from library import MonteCarlo_new
-#from library import common_database_functions, my_time, classification
-from library import my_time, classification
+from library import common_database_functions, my_time, classification
+#from library import my_time, classification
 import datetime
 import json
 import pandas as pd
@@ -249,11 +249,11 @@ def single_listing_prediction(experiment_name, start, end, k_iterations = 1, Pof
             results[return_tuple[0]] = return_tuple[1]
             process_tuple.join()
 
-    #classification.save_to_database("monte_carlo_individual_results", experiment_name, location_dict[int(location_id)], results)
+    classification.save_to_database("monte_carlo_individual_results", experiment_name, location_dict[int(location_id)], results)
 
     all_results[location_dict[int(location_id)]] = results_averaging(results)
 
-    #classification.save_to_database("monte_carlo_average_results", experiment_name, location_dict[int(location_id)], all_results[location_dict[int(location_id)]])
+    classification.save_to_database("monte_carlo_average_results", experiment_name, location_dict[int(location_id)], all_results[location_dict[int(location_id)]])
 
     print all_results[location_dict[int(location_id)]]
     print "analyzed ", len(results), "records"

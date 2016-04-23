@@ -1,0 +1,3 @@
+[submodule "shared_config"]
+	path = shared_config
+	url = https://github.com/wongstein/shared_config
