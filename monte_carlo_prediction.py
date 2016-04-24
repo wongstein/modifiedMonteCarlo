@@ -22,10 +22,10 @@ outputs a dictionary with: all reservations known for that day
 
 returns dict: day: i: duration, or dict: day: None for empty days.  Doesn't really change anything because an empty dict still returns False
 '''
-with open('data/Rome_reservations.json') as jsonFile:
+with open('data/reservation_dict_combined.json') as jsonFile:
     reservation_data = json.load(jsonFile)
 
-with open('data/Rome_occupancy.json') as jsonFile:
+with open('data/occupancy_dict.json') as jsonFile:
     occupancy_dict = json.load(jsonFile)
 
 start_date = None
